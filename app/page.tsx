@@ -7,7 +7,7 @@ export default function Home() {
     <main>
       <Button
         onClick={() => {
-          puppeteerBrowser({ cuit: "20222222222", password: "123456" });
+          puppeteerBrowser({ cuit: "", password: "" });
         }}
       >
         Click
