@@ -6,7 +6,7 @@ export const puppeteerCumplidos = async ({ cuit, password }: { cuit: string; pas
   const page = await browser.newPage();
 
   await page.goto("https://auth.afip.gob.ar/contribuyente_/login.xhtml");
-  await page.setViewport({ width: 2080, height: 2024 });
+  await page.setViewport({ width: 1080, height: 1024 });
 
   await page.locator(".form-control").fill(cuit);
   await page.locator(".btn-info").click();
@@ -149,23 +149,29 @@ export const puppeteerReintegros = async ({ cuit, password }: { cuit: string; pa
   await page2.keyboard.press("Tab");
   await page2.waitForSelector("text/METRIVE SA");
 
+  await page2.evaluate(() => {
+    const $select = $('select[name="aduana"]');
+    if ($select.length) {
+      $select.val("060").trigger("change"); // Updates Select2 and hidden input
+    }
+  });
+
+  await page2.evaluate(() => {
+    const $select = $('select[name="estadoReintegroDesc"]');
+    if ($select.length) {
+      $select.val("REINTEGRO OBSERVADO").trigger("change"); // Updates Select2 and hidden input
+    }
+  });
+  // await page2.locator(".btn.btn-primary.btn-buscar").click();
+
   try {
     //!!TODO FIX THIS
-    await page2.waitForNetworkIdle({ timeout: 5000 });
+    await page2.waitForNetworkIdle({ timeout: 2000 });
   } catch (error) {
     console.error("Error waiting for network idle:", error);
   }
 
-  await page.evaluate(() => {
-  const select = document.querySelector('select[name="aduana"]');
-  if (select) {
-    select.value = "060"; // Set the select value to "060-SAN PEDRO"
-    select.dispatchEvent(new Event("change", { bubbles: true })); // Notify Select2
-  }
-});
-  // await page2.locator(".btn.btn-primary.btn-buscar").click();
-
- // await page2.locator("text/Buscar").click();
+   await page2.locator("text/Buscar").click();
 
   await page2.waitForNavigation();
 
