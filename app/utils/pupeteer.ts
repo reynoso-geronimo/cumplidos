@@ -1,5 +1,6 @@
 "use server";
-import puppeteer from "puppeteer";
+import puppeteer, { Page } from "puppeteer";
+import { format, subMonths } from "date-fns";
 
 export const puppeteerCumplidos = async ({ cuit, password }: { cuit: string; password: string }) => {
   const browser = await puppeteer.launch({ headless: true });
@@ -109,7 +110,9 @@ export const puppeteerReintegros = async ({ cuit, password }: { cuit: string; pa
   await page.waitForNetworkIdle();
   const pages = await browser.pages();
   const page2 = pages[pages.length - 1];
-
+  page2.on("dialog", async dialog => {
+    await dialog.accept(); // This will click OK/Accept on alerts
+  });
   await page2.waitForNetworkIdle();
 
   // Find all select elements
@@ -137,7 +140,6 @@ export const puppeteerReintegros = async ({ cuit, password }: { cuit: string; pa
 
   //await page2.waitForNetworkIdle();
   try {
-    //!!TODO FIX THIS
     await page2.waitForNetworkIdle({ timeout: 5000 });
   } catch (error) {
     console.error("Error waiting for network idle:", error);
@@ -162,37 +164,74 @@ export const puppeteerReintegros = async ({ cuit, password }: { cuit: string; pa
       $select.val("REINTEGRO OBSERVADO").trigger("change"); // Updates Select2 and hidden input
     }
   });
-  // await page2.locator(".btn.btn-primary.btn-buscar").click();
 
-  try {
-    //!!TODO FIX THIS
-    await page2.waitForNetworkIdle({ timeout: 2000 });
-  } catch (error) {
-    console.error("Error waiting for network idle:", error);
-  }
+  const allResults = [];
+  for (let monthOffset = 0; monthOffset <= 5; monthOffset++) {
+    console.log(`Searching month range ${monthOffset + 1} months ago`);
+    await searchMonthRange(page2, monthOffset);
 
-   await page2.locator("text/Buscar").click();
+    // Process results
+    const rows = await page2.$$("tr");
+    const filteredRows = [];
+    for (const row of rows) {
+      const linkText = await row.$eval("a", el => el.innerText.trim()).catch(() => null);
+      if (linkText === "AUTO") {
+        const rowData = await row.evaluate(el => el.innerText.trim());
+        filteredRows.push({ text: rowData, monthsAgo: monthOffset });
+      }
+    }
 
-  await page2.waitForNavigation();
+    console.log(`Se encontraron ${filteredRows.length} filas con "AUTO" para el mes ${monthOffset + 1}`);
 
-  //  await page2.locator("text/Estado").click();
+    // If you need to store all results
+    allResults.push(...filteredRows);
 
-  await page2.locator(".form-control.input-sm").fill("200");
-  await page2.locator(".codigoEstadoDestinacion").click();
-
-  const rows = await page2.$$("tr");
-
-  const filteredRows = [];
-  for (const row of rows) {
-    const linkText = await row.$eval("a", el => el.innerText.trim()).catch(() => null);
-    if (linkText === "AUTO") {
-      const rowData = await row.evaluate(el => el.innerText.trim());
-      filteredRows.push({ text: rowData });
+    // Navigate back to search page if not the last iteration
+    if (monthOffset < 5) {
+      await page2.goto("https://serviciosadu.afip.gob.ar/DIAV2/MOA.Web/Moa.Beneficios.Web/MoaBeneficios/FiltroDeclas");
+      await page2.waitForNetworkIdle({ timeout: 5000 }).catch(console.error);
     }
   }
+  return allResults;
+};
 
-  console.log(`Se encontraron ${filteredRows.length} filas con "AUTO"`);
-  //await browser.close();
+const searchMonthRange = async (page2: Page, monthsAgo: number) => {
+  const today = new Date();
+  const startDate = subMonths(today, monthsAgo + 1); // Previous month
+  const endDate = subMonths(today, monthsAgo); // Current month
 
-  return filteredRows;
+  const dates = {
+    desde: {
+      visible: format(startDate, "dd/MM/yyyy"),
+      hidden: format(startDate, "yyyy-MM-dd") + " 00:00:00",
+    },
+    hasta: {
+      visible: format(endDate, "dd/MM/yyyy"),
+      hidden: format(endDate, "yyyy-MM-dd") + " 23:59:59",
+    },
+  };
+
+  // Fill both pairs of inputs
+  await page2.evaluate(dates => {
+    const visibleDesde = document.querySelector('input[name="fechaOficDesdeMask"]') as HTMLInputElement;
+    const hiddenDesde = document.querySelector('input[name="fechaOficDesde"]') as HTMLInputElement;
+    const visibleHasta = document.querySelector('input[name="fechaOficHastaMask"]') as HTMLInputElement;
+    const hiddenHasta = document.querySelector('input[name="fechaOficHasta"]') as HTMLInputElement;
+
+    if (visibleDesde) visibleDesde.value = dates.desde.visible;
+    if (hiddenDesde) hiddenDesde.value = dates.desde.hidden;
+    if (visibleHasta) visibleHasta.value = dates.hasta.visible;
+    if (hiddenHasta) hiddenHasta.value = dates.hasta.hidden;
+
+    [visibleDesde, visibleHasta].forEach(input => {
+      input?.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }, dates);
+
+  await page2
+    .waitForNetworkIdle({ timeout: 2000 })
+    .catch(error => console.error("Error waiting for network idle:", error));
+
+  await page2.locator("text/Buscar").click();
+  await page2.waitForNavigation();
 };
