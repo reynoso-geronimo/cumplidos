@@ -1,9 +1,9 @@
 "use server";
 import puppeteer, { Page } from "puppeteer";
-import { format, subMonths } from "date-fns";
+import { format } from "date-fns";
 
 export const puppeteerCumplidos = async ({ cuit, password }: { cuit: string; password: string }) => {
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({ headless: false });
   const page = await browser.newPage();
 
   await page.goto("https://auth.afip.gob.ar/contribuyente_/login.xhtml");
@@ -139,66 +139,85 @@ export const puppeteerReintegros = async ({ cuit, password }: { cuit: string; pa
   await page2.goto("https://serviciosadu.afip.gob.ar/DIAV2/MOA.Web/Moa.Beneficios.Web/MoaBeneficios/FiltroDeclas");
 
   //await page2.waitForNetworkIdle();
-  try {
-    await page2.waitForNetworkIdle({ timeout: 5000 });
-  } catch (error) {
-    console.error("Error waiting for network idle:", error);
-  }
-
-  //await page2.waitForSelector(".campo.campo-cuit-visible.form-control")
-  await page2.locator(".campo.campo-cuit-visible.form-control").fill("30531413586");
-
-  await page2.keyboard.press("Tab");
-  await page2.waitForSelector("text/METRIVE SA");
-
-  await page2.evaluate(() => {
-    const $select = $('select[name="aduana"]');
-    if ($select.length) {
-      $select.val("060").trigger("change"); // Updates Select2 and hidden input
-    }
-  });
-
-  await page2.evaluate(() => {
-    const $select = $('select[name="estadoReintegroDesc"]');
-    if ($select.length) {
-      $select.val("REINTEGRO OBSERVADO").trigger("change"); // Updates Select2 and hidden input
-    }
-  });
 
   const allResults = [];
-  for (let monthOffset = 0; monthOffset <= 5; monthOffset++) {
-    console.log(`Searching month range ${monthOffset + 1} months ago`);
-    await searchMonthRange(page2, monthOffset);
-
-    // Process results
-    const rows = await page2.$$("tr");
-    const filteredRows = [];
-    for (const row of rows) {
-      const linkText = await row.$eval("a", el => el.innerText.trim()).catch(() => null);
-      if (linkText === "AUTO") {
-        const rowData = await row.evaluate(el => el.innerText.trim());
-        filteredRows.push({ text: rowData, monthsAgo: monthOffset });
-      }
+  for (let periodIndex = 0; periodIndex <= 5; periodIndex++) {
+    try {
+      await page2.waitForNetworkIdle({ timeout: 5000 });
+    } catch (error) {
+      console.error("Error waiting for network idle:", error);
     }
 
-    console.log(`Se encontraron ${filteredRows.length} filas con "AUTO" para el mes ${monthOffset + 1}`);
+    //await page2.waitForSelector(".campo.campo-cuit-visible.form-control")
+    await page2.locator(".campo.campo-cuit-visible.form-control").fill("30506730038");
+
+    await page2.keyboard.press("Tab");
+    //await page2.waitForSelector("text/METRIVE SA");
+    await page2.waitForSelector("text/S A IMPORTADORA Y EXPORTADORA DE LA PATAGONIA");
+    await page2.evaluate(() => {
+      const $select = $('select[name="aduana"]');
+      if ($select.length) {
+        $select.val("060").trigger("change"); // Updates Select2 and hidden input
+      }
+    });
+
+    await page2.evaluate(() => {
+      // Select the main select element
+      const select = document.querySelector('select[name="estadoReintegro"]') as HTMLSelectElement;
+      if (select) {
+        // Set the value on the original select
+        select.value = "C";
+
+        // Trigger the Select2 update
+
+        $(select).val("C").trigger("change");
+
+        // Update the hidden input
+        const hiddenInput = document.querySelector('input[name="estadoReintegroDesc"]') as HTMLInputElement;
+        if (hiddenInput) {
+          hiddenInput.value = "REINTEGRO OBSERVADO";
+        }
+      }
+    });
+
+    console.log(`Searching period ${periodIndex + 1} (${30 * (periodIndex + 1)} days ago)`);
+    await searchMonthRange(page2, periodIndex);
+    await page2.locator(".form-control.input-sm").fill("200");
+    // Process results
+    const rows = await page2.$$("#DataTables_Table_0 > tbody > tr");
+    const filteredRows = [];
+    for (const row of rows) {
+      /* const linkText = await row.$eval("a", el => el.innerText.trim()).catch(() => null);
+      if (linkText === "AUTO") { */
+      const rowData = await row.evaluate(el => el.innerText.trim());
+      filteredRows.push({ text: rowData, monthsAgo: periodIndex });
+      /*    } */
+    }
+
+    console.log(`Se encontraron ${filteredRows.length} filas con "AUTO" para el mes ${periodIndex + 1}`);
 
     // If you need to store all results
     allResults.push(...filteredRows);
 
     // Navigate back to search page if not the last iteration
-    if (monthOffset < 5) {
+    if (periodIndex < 5) {
       await page2.goto("https://serviciosadu.afip.gob.ar/DIAV2/MOA.Web/Moa.Beneficios.Web/MoaBeneficios/FiltroDeclas");
-      await page2.waitForNetworkIdle({ timeout: 5000 }).catch(console.error);
+      await page2.waitForNetworkIdle({ timeout: 5000 }).catch(() => {
+        console.log("waited for 5000ms");
+      });
     }
   }
   return allResults;
 };
 
-const searchMonthRange = async (page2: Page, monthsAgo: number) => {
+const searchMonthRange = async (page2: Page, periodIndex: number) => {
   const today = new Date();
-  const startDate = subMonths(today, monthsAgo + 1); // Previous month
-  const endDate = subMonths(today, monthsAgo); // Current month
+  const daysPerPeriod = 30;
+  // Calculate start and end dates based on 30-day periods
+  const startDate = new Date(today);
+  startDate.setDate(today.getDate() - (periodIndex + 1) * daysPerPeriod);
+  const endDate = new Date(today);
+  endDate.setDate(today.getDate() - periodIndex * daysPerPeriod);
 
   const dates = {
     desde: {
@@ -228,9 +247,8 @@ const searchMonthRange = async (page2: Page, monthsAgo: number) => {
     });
   }, dates);
 
-  await page2
-    .waitForNetworkIdle({ timeout: 2000 })
-    .catch(error => console.error("Error waiting for network idle:", error));
+  console.log("waiting for idle before range search");
+  await page2.waitForNetworkIdle({ timeout: 30000 }).catch(() => {});
 
   await page2.locator("text/Buscar").click();
   await page2.waitForNavigation();
