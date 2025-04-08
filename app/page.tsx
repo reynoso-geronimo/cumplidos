@@ -10,6 +10,8 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { puppeteerReintegros } from "./utils/pupeteer";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { empresas } from ".";
+import { DataTable } from "@/components/ui/data-table/data-table";
+import { Cumplido, columns } from "./columns";
 
 // Define the enum type
 const EstadoEnum = z.enum(["TODOS", "OBSERVADO"]);
@@ -21,13 +23,14 @@ const formSchema = z.object({
   estado: EstadoEnum,
   empresa: z.string(),
   rango: z.string().min(1, "El rango debe ser mayor a 0").max(12, "El rango debe ser menor a 12"),
+  aduana: z.string(),
 });
 
 // Define the form values type
 type FormValues = z.infer<typeof formSchema>;
 
 export default function Home() {
-  const [responseData, setResponseData] = useState<string[][]>([]);
+  const [responseData, setResponseData] = useState<Cumplido[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -38,6 +41,7 @@ export default function Home() {
       password: "",
       estado: "TODOS",
       rango: "1",
+      aduana: "060",
     },
   });
 
@@ -47,11 +51,29 @@ export default function Home() {
     try {
       const response = await puppeteerReintegros(values);
 
+      // Check if response is an error object
+      if ("error" in response) {
+        setError(response.error);
+        return;
+      }
+
       if (!response || response.length === 0) {
         setError("No se encontraron resultados.");
       } else {
         // Extract and split tab-separated values
-        const formattedData = response.map((item: { text: string }) => item.text.split("\t"));
+        const formattedData = response.map((item: { text: string }) => {
+          const rowData = item.text.split("\t");
+          return {
+            permiso: rowData[0] || "",
+            cuitEmpresa: rowData[1] || "",
+            cuitDespa: rowData[2] || "",
+            oficializacion: rowData[3] || "",
+            estado: rowData[4] || "",
+            fechaEstado: rowData[5] || "",
+            monto: rowData[6] || "",
+            devoluciones: rowData[7] || "",
+          };
+        });
         setResponseData(formattedData);
       }
     } catch (err) {
@@ -148,6 +170,36 @@ export default function Home() {
                 </FormItem>
               )}
             />
+
+            {/* Aduana */}
+            <FormField
+              control={form.control}
+              name="aduana"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Aduana</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Seleccione aduana" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {[...Array(160)].map((_, index) => {
+                        // Format the aduana number as a 3-digit string with leading zeros
+                        const aduanaNumber = (index + 1).toString().padStart(3, "0");
+                        return (
+                          <SelectItem key={index + 1} value={aduanaNumber}>
+                            {aduanaNumber}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
           </div>
 
           {/* Empresas */}
@@ -159,13 +211,17 @@ export default function Home() {
                 <FormLabel>Empresa</FormLabel>
                 <Select onValueChange={field.onChange}>
                   <FormControl>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccione estado" />
+                    <SelectTrigger className="max-w-full overflow-hidden">
+                      <SelectValue placeholder="Seleccione empresa" />
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
                     {empresas.map(empresa => (
-                      <SelectItem key={empresa.cuit} value={empresa.cuit}>
+                      <SelectItem
+                        key={empresa.cuit}
+                        value={empresa.cuit}
+                        title={empresa.nombre} // Shows full name on hover
+                      >
                         {empresa.nombre}
                       </SelectItem>
                     ))}
@@ -186,37 +242,11 @@ export default function Home() {
       {/* Error Message */}
       {error && <p className="text-red-500 mt-4">{error}</p>}
 
-      {/* Response Table */}
+      {/* Response Table - Now using DataTable component */}
       {responseData.length > 0 && (
-        <div className="mt-6 w-full ">
-          <h3 className="text-lg font-semibold">Resultados</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-gray-200">
-              <thead>
-                <tr className="bg-gray-100 capitalize">
-                  <th className="border border-gray-300 px-4 py-2">Permiso</th>
-                  <th className="border border-gray-300 px-4 py-2">CUIT EMPRESA</th>
-                  <th className="border border-gray-300 px-4 py-2">CUIT DESPA</th>
-                  <th className="border border-gray-300 px-4 py-2">Oficialización</th>
-                  <th className="border border-gray-300 px-4 py-2">Estado</th>
-                  <th className="border border-gray-300 px-4 py-2">Fecha estado</th>
-                  <th className="border border-gray-300 px-4 py-2">Monto</th>
-                  <th className="border border-gray-300 px-4 py-2">Devoluciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {responseData.map((row, index) => (
-                  <tr key={index} className="border border-gray-300">
-                    {row.map((cell, cellIndex) => (
-                      <td key={cellIndex} className="border border-gray-300 px-4 py-2">
-                        {cell}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="mt-6 w-full">
+          <h3 className="text-lg font-semibold mb-4">Resultados</h3>
+          <DataTable columns={columns} data={responseData} />
         </div>
       )}
     </main>
