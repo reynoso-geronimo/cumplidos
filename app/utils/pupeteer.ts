@@ -1,9 +1,10 @@
 "use server";
 import puppeteer, { Page } from "puppeteer";
 import { format } from "date-fns";
+import { empresas } from "..";
 
 export const puppeteerCumplidos = async ({ cuit, password }: { cuit: string; password: string }) => {
-  const browser = await puppeteer.launch({ headless: false });
+  const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
 
   await page.goto("https://auth.afip.gob.ar/contribuyente_/login.xhtml");
@@ -52,7 +53,7 @@ export const puppeteerCumplidos = async ({ cuit, password }: { cuit: string; pas
   //await page2.waitForNetworkIdle();
   try {
     //!!TODO FIX THIS
-    await page2.waitForNetworkIdle({ timeout: 5000 });
+    await page2.waitForNetworkIdle({ timeout: 2000 });
   } catch (error) {
     console.error("Error waiting for network idle:", error);
   }
@@ -91,9 +92,23 @@ export const puppeteerCumplidos = async ({ cuit, password }: { cuit: string; pas
   return filteredRows;
 };
 
-export const puppeteerReintegros = async ({ cuit, password }: { cuit: string; password: string }) => {
-  const browser = await puppeteer.launch({ headless: false });
+export const puppeteerReintegros = async ({
+  cuit,
+  password,
+  estado,
+  empresa,
+  rango,
+}: {
+  cuit: string;
+  password: string;
+  estado: "TODOS" | "OBSERVADO";
+  empresa: string;
+  rango: string;
+}) => {
+  const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
+
+  const nombreEmpresa = empresas.find(e => e.cuit === empresa)?.nombre;
 
   await page.goto("https://auth.afip.gob.ar/contribuyente_/login.xhtml");
   await page.setViewport({ width: 2080, height: 2024 });
@@ -141,19 +156,20 @@ export const puppeteerReintegros = async ({ cuit, password }: { cuit: string; pa
   //await page2.waitForNetworkIdle();
 
   const allResults = [];
-  for (let periodIndex = 0; periodIndex <= 5; periodIndex++) {
+  for (let periodIndex = 0; periodIndex < parseInt(rango); periodIndex++) {
     try {
-      await page2.waitForNetworkIdle({ timeout: 5000 });
+      await page2.waitForNetworkIdle({ timeout: 2000 });
     } catch (error) {
       console.error("Error waiting for network idle:", error);
     }
 
     //await page2.waitForSelector(".campo.campo-cuit-visible.form-control")
-    await page2.locator(".campo.campo-cuit-visible.form-control").fill("30506730038");
+    await page2.locator(".campo.campo-cuit-visible.form-control").fill(`${empresa}`);
 
     await page2.keyboard.press("Tab");
     //await page2.waitForSelector("text/METRIVE SA");
-    await page2.waitForSelector("text/S A IMPORTADORA Y EXPORTADORA DE LA PATAGONIA");
+    //await page2.waitForSelector("text/S A IMPORTADORA Y EXPORTADORA DE LA PATAGONIA");
+    await page2.waitForSelector(`text/${nombreEmpresa}`);
     await page2.evaluate(() => {
       const $select = $('select[name="aduana"]');
       if ($select.length) {
@@ -161,28 +177,31 @@ export const puppeteerReintegros = async ({ cuit, password }: { cuit: string; pa
       }
     });
 
-    await page2.evaluate(() => {
-      // Select the main select element
-      const select = document.querySelector('select[name="estadoReintegro"]') as HTMLSelectElement;
-      if (select) {
-        // Set the value on the original select
-        select.value = "C";
+    if (estado === "OBSERVADO") {
+      await page2.evaluate(() => {
+        // Select the main select element
+        const select = document.querySelector('select[name="estadoReintegro"]') as HTMLSelectElement;
+        if (select) {
+          // Set the value on the original select
+          select.value = "C";
 
-        // Trigger the Select2 update
+          // Trigger the Select2 update
 
-        $(select).val("C").trigger("change");
+          $(select).val("C").trigger("change");
 
-        // Update the hidden input
-        const hiddenInput = document.querySelector('input[name="estadoReintegroDesc"]') as HTMLInputElement;
-        if (hiddenInput) {
-          hiddenInput.value = "REINTEGRO OBSERVADO";
+          // Update the hidden input
+          const hiddenInput = document.querySelector('input[name="estadoReintegroDesc"]') as HTMLInputElement;
+          if (hiddenInput) {
+            hiddenInput.value = "REINTEGRO OBSERVADO";
+          }
         }
-      }
-    });
+      });
+    }
 
     console.log(`Searching period ${periodIndex + 1} (${30 * (periodIndex + 1)} days ago)`);
     await searchMonthRange(page2, periodIndex);
-    await page2.locator(".form-control.input-sm").fill("200");
+    await page2.locator(".form-control.input-sm").fill("-1");
+
     // Process results
     const rows = await page2.$$("#DataTables_Table_0 > tbody > tr");
     const filteredRows = [];
@@ -200,13 +219,13 @@ export const puppeteerReintegros = async ({ cuit, password }: { cuit: string; pa
     allResults.push(...filteredRows);
 
     // Navigate back to search page if not the last iteration
-    if (periodIndex < 5) {
-      await page2.goto("https://serviciosadu.afip.gob.ar/DIAV2/MOA.Web/Moa.Beneficios.Web/MoaBeneficios/FiltroDeclas");
-      await page2.waitForNetworkIdle({ timeout: 5000 }).catch(() => {
-        console.log("waited for 5000ms");
-      });
-    }
+
+    await page2.goto("https://serviciosadu.afip.gob.ar/DIAV2/MOA.Web/Moa.Beneficios.Web/MoaBeneficios/FiltroDeclas");
+    await page2.waitForNetworkIdle({ timeout: 2000 }).catch(() => {
+      console.log("waited for 2000ms");
+    });
   }
+  await browser.close();
   return allResults;
 };
 
@@ -248,7 +267,7 @@ const searchMonthRange = async (page2: Page, periodIndex: number) => {
   }, dates);
 
   console.log("waiting for idle before range search");
-  await page2.waitForNetworkIdle({ timeout: 30000 }).catch(() => {});
+  await page2.waitForNetworkIdle({ timeout: 2000 }).catch(() => {});
 
   await page2.locator("text/Buscar").click();
   await page2.waitForNavigation();
